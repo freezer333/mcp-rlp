@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "description": "Simplified MCP server example with Express",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node --experimental-sqlite index.js",
+    "dev": "nodemon --experimental-sqlite index.js",
+    "init": "node initialize-data.js"
   },
   "author": "",
   "license": "MIT",

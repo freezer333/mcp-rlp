@@ -64,6 +64,38 @@ class MCPServer {
     }
 
     /**
+     * Starts MCP server with stdio transport for Claude Desktop integration.
+     * @param {Function} contextProvider - Optional async function () => context
+     */
+    async runStdio(contextProvider) {
+        const { StdioServerTransport } = await import(
+            "@modelcontextprotocol/sdk/server/stdio.js"
+        );
+
+        const config = {
+            server_name: this.#server_name,
+            server_version: this.#server_version,
+            ToolBoxes: this.#ToolBoxes
+        };
+
+        // Get context from provider or use empty object
+        const context = contextProvider
+            ? await contextProvider()
+            : {};
+
+        const server = await this.#buildServer(context, config);
+        const transport = new StdioServerTransport();
+
+        await server.connect(transport);
+
+        // Handle shutdown gracefully
+        process.on('SIGINT', async () => {
+            await server.close();
+            process.exit(0);
+        });
+    }
+
+    /**
      * Returns Express middleware for the MCP streaming endpoint.
      * @param {Function} contextProvider - Optional async function (req) => context
      */

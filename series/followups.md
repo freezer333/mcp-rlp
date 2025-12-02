@@ -1,0 +1,6 @@
+- articles on saving results vs saving query
+- articles on making SQL or MOngoDB MCP servers
+- articles on layering reports -> charts -> dashboards
+- implement a full-on IPEDS MCP from appiversity, with reporting client
+    - create a much better view of the data (or set of views)
+    - implement a read-only PG solution

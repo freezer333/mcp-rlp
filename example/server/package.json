@@ -1,0 +1,22 @@
+{
+  "name": "mcp-server-example",
+  "version": "1.0.0",
+  "description": "Simplified MCP server example with Express",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

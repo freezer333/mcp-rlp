@@ -53,10 +53,15 @@ const queryDualResponse = (context) => {
 
     return {
         name: 'query',
-        description: `Execute a read-only SQL query against the insights database. Returns a SAMPLE of results (up to ${DEFAULT_SAMPLE_SIZE} rows) along with total count and a resource link for retrieving the full dataset. The database contains IPEDS higher education data including institutions, programs, degrees awarded, occupations, and program-occupation mappings. Use the schema(table) tool first to understand table structures.`,
+        description: `Execute a read-only SQL query against the insights database. Returns a SAMPLE of results (up to ${DEFAULT_SAMPLE_SIZE} rows) along with total count and a resource link for retrieving the full dataset. The database contains IPEDS higher education data including institutions, programs, degrees awarded, occupations, and program-occupation mappings. Use the schema(table) tool first to understand table structures.
+
+IMPORTANT: Institution and program names are stored in UPPERCASE. When searching by name, always use case-insensitive matching:
+- Use LIKE with UPPER(): WHERE UPPER(name) LIKE UPPER('%ramapo%')
+- Or use LIKE with uppercase pattern: WHERE name LIKE '%RAMAPO%'
+- Never use exact = comparisons for names unless you're certain of the exact case.`,
 
         schema: {
-            sql: z.string().describe('The SQL SELECT query to execute. Must be a valid SQLite query. Do NOT include LIMIT clause - sampling is handled automatically.')
+            sql: z.string().describe('The SQL SELECT query to execute. Must be a valid SQLite query. Do NOT include LIMIT clause - sampling is handled automatically. Use LIKE with UPPER() for case-insensitive name searches.')
         },
 
         // Output schema matches the dual-response spec

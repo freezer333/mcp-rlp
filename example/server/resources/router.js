@@ -29,13 +29,20 @@ function createResourceRouter(resourceStore, options = {}) {
 
     /**
      * GET /resources/:guid
-     * Returns all data for the resource (no pagination)
+     * Returns data for the resource with optional pagination
+     *
+     * Query parameters:
+     *   skip: number (default: 0) - rows to skip
+     *   limit: number (optional) - max rows to return (omit for all)
      */
     router.get('/:guid', (req, res) => {
         const { guid } = req.params;
+        const skip = parseInt(req.query.skip) || 0;
+        const limit = req.query.limit ? parseInt(req.query.limit) : null;
 
         if (debug) {
             console.log('[REST] GET /resources/' + guid);
+            console.log('[REST] Pagination:', { skip, limit });
         }
 
         const resource = resourceStore.get(guid);
@@ -53,21 +60,36 @@ function createResourceRouter(resourceStore, options = {}) {
         try {
             const database = getDatabase();
 
-            if (debug) {
-                console.log('[REST] Executing SQL:', resource.sql.substring(0, 150) + '...');
+            // Build query with pagination
+            let paginatedSql = resource.sql;
+            if (limit !== null) {
+                paginatedSql = `SELECT * FROM (${resource.sql}) LIMIT ${limit} OFFSET ${skip}`;
+            } else if (skip > 0) {
+                paginatedSql = `SELECT * FROM (${resource.sql}) LIMIT -1 OFFSET ${skip}`;
             }
 
-            const stmt = database.prepare(resource.sql);
+            if (debug) {
+                console.log('[REST] Executing SQL:', paginatedSql.substring(0, 150) + (paginatedSql.length > 150 ? '...' : ''));
+            }
+
+            const stmt = database.prepare(paginatedSql);
             const rows = stmt.all();
 
             if (debug) {
                 console.log('[REST] Returned rows:', rows.length);
             }
 
+            const hasNext = limit !== null && (skip + rows.length) < resource.totalCount;
+            const hasPrev = skip > 0;
+
             res.json({
                 data: rows,
                 total_count: resource.totalCount,
                 returned_count: rows.length,
+                skip,
+                limit,
+                has_next: hasNext,
+                has_prev: hasPrev,
                 columns: resource.columns,
                 created_at: resource.createdAt,
                 expires_at: resource.expiresAt

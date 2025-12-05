@@ -121,12 +121,15 @@ Start by calling the 'tips' tool to understand the database structure if this is
             },
             onToolResult: (toolResult) => {
                 if (this.#debug) {
-                    console.log('[DEBUG] Tool result:', toolResult);
+                    console.log('[DEBUG] Tool result:', JSON.stringify(toolResult, null, 2));
+                    console.log('[DEBUG] Tool result.result:', JSON.stringify(toolResult.result, null, 2));
                 }
 
                 // Check for dual-response pattern
-                if (this.#dualResponseClient.isDualResponse(toolResult.result)) {
-                    const parsed = this.#dualResponseClient.parse(toolResult.result);
+                // The result might be directly on toolResult or on toolResult.result
+                const resultToCheck = toolResult.result || toolResult;
+                if (this.#dualResponseClient.isDualResponse(resultToCheck)) {
+                    const parsed = this.#dualResponseClient.parse(resultToCheck);
                     if (parsed) {
                         if (this.#debug) {
                             console.log('[DEBUG] Dual-response detected:', {
@@ -151,6 +154,82 @@ Start by calling the 'tips' tool to understand the database structure if this is
         if (this.#debug) {
             console.log('[DEBUG] Run result:', result);
             console.log('[DEBUG] Pending dual-responses:', this.#pendingDualResponses.length);
+        }
+
+        // Extract dual-responses from generated items since callbacks may not fire
+        // The SDK stores tool outputs in result.state._generatedItems
+        if (result.state?._generatedItems) {
+            for (const item of result.state._generatedItems) {
+                // Only process tool call output items
+                if (item.type !== 'tool_call_output_item') continue;
+
+                // The output is at rawItem.output and may be nested:
+                // { type: "text", text: "{\"type\":\"text\",\"text\":\"{...actual JSON...}\"}" }
+                const rawOutput = item.rawItem?.output;
+                if (!rawOutput) continue;
+
+                // Unwrap the nested structure to get to the actual JSON
+                let actualData = null;
+                try {
+                    // rawOutput is { type: "text", text: "..." }
+                    if (rawOutput.type === 'text' && rawOutput.text) {
+                        // Parse first level - might be another wrapper or actual data
+                        const level1 = JSON.parse(rawOutput.text);
+                        if (level1.type === 'text' && level1.text) {
+                            // Another level of wrapping
+                            actualData = JSON.parse(level1.text);
+                        } else {
+                            actualData = level1;
+                        }
+                    } else if (typeof rawOutput === 'string') {
+                        actualData = JSON.parse(rawOutput);
+                    } else {
+                        actualData = rawOutput;
+                    }
+                } catch (e) {
+                    if (this.#debug) {
+                        console.log('[DEBUG] Failed to parse tool output:', e.message);
+                    }
+                    continue;
+                }
+
+                if (this.#debug) {
+                    console.log('[DEBUG] Parsed tool output keys:', actualData ? Object.keys(actualData) : 'null');
+                }
+
+                // Check if this is a dual-response (has resource.url)
+                if (actualData?.resource?.url) {
+                    if (this.#debug) {
+                        console.log('[DEBUG] Dual-response found:', {
+                            totalCount: actualData.metadata?.total_count,
+                            resourceUrl: actualData.resource.url
+                        });
+                    }
+
+                    const parsed = {
+                        sample: actualData.results || [],
+                        totalCount: actualData.metadata?.total_count || 0,
+                        sampleCount: actualData.metadata?.sample_count || actualData.results?.length || 0,
+                        resourceUri: actualData.resource.uri,
+                        resourceUrl: actualData.resource.url,
+                        columns: actualData.metadata?.columns || [],
+                        executedAt: actualData.metadata?.executed_at,
+                        expiresAt: actualData.metadata?.expires_at
+                    };
+
+                    // Avoid duplicates
+                    if (!this.#pendingDualResponses.some(dr => dr.resourceUrl === parsed.resourceUrl)) {
+                        this.#pendingDualResponses.push({
+                            toolName: item.rawItem?.name || 'query',
+                            ...parsed
+                        });
+                    }
+                }
+            }
+        }
+
+        if (this.#debug) {
+            console.log('[DEBUG] Final pending dual-responses:', this.#pendingDualResponses.length);
         }
 
         // Save history for next turn
@@ -193,9 +272,8 @@ Start by calling the 'tips' tool to understand the database structure if this is
      *
      * @param {Object} dualResponse - Parsed dual-response from chat()
      * @param {Object} options - Fetch options
-     * @param {number} options.offset - Starting row offset
+     * @param {number} options.skip - Rows to skip
      * @param {number} options.limit - Max rows to fetch
-     * @param {Object} options.sort - Sort options: { field, order }
      * @returns {Promise<Object>} Page of data with pagination info
      */
     async fetchDualResponsePage(dualResponse, options = {}) {

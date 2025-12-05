@@ -111,7 +111,7 @@ export class TerminalUI {
             process.exit(0);
         });
 
-        // Tab to switch focus
+        // Tab to switch focus between input and output
         this.#screen.key(['tab'], () => {
             if (this.#screen.focused === this.#inputBox) {
                 this.#outputBox.focus();

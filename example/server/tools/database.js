@@ -95,9 +95,14 @@ const schema = (context) => {
 const query = (context) => {
     return {
         name: 'query',
-        description: 'Execute a read-only SQL query against the insights database. The database connection is read-only, so only SELECT statements will work. Use the schema(table) tool first to understand table structures and relationships. The database contains IPEDS higher education data including institutions, programs, degrees awarded, occupations, and program-occupation mappings.',
+        description: `Execute a read-only SQL query against the insights database. The database connection is read-only, so only SELECT statements will work. Use the schema(table) tool first to understand table structures and relationships. The database contains IPEDS higher education data including institutions, programs, degrees awarded, occupations, and program-occupation mappings.
+
+IMPORTANT: Institution and program names are stored in UPPERCASE. When searching by name, always use case-insensitive matching:
+- Use LIKE with UPPER(): WHERE UPPER(name) LIKE UPPER('%ramapo%')
+- Or use LIKE with uppercase pattern: WHERE name LIKE '%RAMAPO%'
+- Never use exact = comparisons for names unless you're certain of the exact case.`,
         schema: {
-            sql: z.string().describe('The SQL SELECT query to execute. Must be a valid SQLite query. Use LIMIT clauses to control result size. The connection is read-only so INSERT, UPDATE, DELETE, etc. will fail.')
+            sql: z.string().describe('The SQL SELECT query to execute. Must be a valid SQLite query. Use LIMIT clauses to control result size. Use LIKE with UPPER() for case-insensitive name searches.')
         },
         outputSchema: {
             rows: z.array(z.record(z.any())).describe('Array of result rows, where each row is an object with column names as keys'),

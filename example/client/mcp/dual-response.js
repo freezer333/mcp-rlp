@@ -21,6 +21,8 @@ export class DualResponseClient {
      * Detection criteria:
      * - Has structuredContent with resource.url
      * - Or has content with resource:// URI
+     * - Or is a parsed object with resource.url (from JSON text)
+     * - Or is a string containing JSON with resource.url
      *
      * @param {Object} toolResult - The raw result from an MCP tool call
      * @returns {boolean}
@@ -34,16 +36,53 @@ export class DualResponseClient {
             return true;
         }
 
-        // Fallback: check text content for resource:// URI
+        // Check if result itself has resource.url (direct object)
+        if (toolResult?.resource?.url) {
+            if (this.#debug) {
+                console.log('[DualResponse] Detected via resource.url on result object');
+            }
+            return true;
+        }
+
+        // Check text content for resource:// URI or JSON with resource
         if (toolResult?.content) {
             const content = Array.isArray(toolResult.content) ? toolResult.content : [toolResult.content];
             for (const item of content) {
-                if (item?.type === 'text' && item?.text?.includes('resource://')) {
+                if (item?.type === 'text') {
+                    if (item?.text?.includes('resource://')) {
+                        if (this.#debug) {
+                            console.log('[DualResponse] Detected via content text resource:// URI');
+                        }
+                        return true;
+                    }
+                    // Try to parse as JSON
+                    try {
+                        const parsed = JSON.parse(item.text);
+                        if (parsed?.resource?.url) {
+                            if (this.#debug) {
+                                console.log('[DualResponse] Detected via parsed JSON in content text');
+                            }
+                            return true;
+                        }
+                    } catch {
+                        // Not JSON, continue
+                    }
+                }
+            }
+        }
+
+        // Check if toolResult is a string containing JSON with resource
+        if (typeof toolResult === 'string') {
+            try {
+                const parsed = JSON.parse(toolResult);
+                if (parsed?.resource?.url) {
                     if (this.#debug) {
-                        console.log('[DualResponse] Detected via content text resource:// URI');
+                        console.log('[DualResponse] Detected via parsed JSON string');
                     }
                     return true;
                 }
+            } catch {
+                // Not JSON
             }
         }
 
@@ -57,11 +96,49 @@ export class DualResponseClient {
      * @returns {Object|null} Parsed dual-response data or null if not a dual-response
      */
     parse(toolResult) {
-        const structured = toolResult?.structuredContent;
+        // Try to extract the structured data from various formats
+        let structured = null;
+
+        // 1. Check structuredContent (MCP format)
+        if (toolResult?.structuredContent?.resource?.url) {
+            structured = toolResult.structuredContent;
+        }
+        // 2. Check if result itself has resource.url (direct object)
+        else if (toolResult?.resource?.url) {
+            structured = toolResult;
+        }
+        // 3. Check text content for JSON
+        else if (toolResult?.content) {
+            const content = Array.isArray(toolResult.content) ? toolResult.content : [toolResult.content];
+            for (const item of content) {
+                if (item?.type === 'text') {
+                    try {
+                        const parsed = JSON.parse(item.text);
+                        if (parsed?.resource?.url) {
+                            structured = parsed;
+                            break;
+                        }
+                    } catch {
+                        // Not JSON
+                    }
+                }
+            }
+        }
+        // 4. Check if toolResult is a string
+        else if (typeof toolResult === 'string') {
+            try {
+                const parsed = JSON.parse(toolResult);
+                if (parsed?.resource?.url) {
+                    structured = parsed;
+                }
+            } catch {
+                // Not JSON
+            }
+        }
 
         if (!structured?.resource?.url) {
             if (this.#debug) {
-                console.log('[DualResponse] Parse failed: no resource.url in structuredContent');
+                console.log('[DualResponse] Parse failed: no resource.url found');
             }
             return null;
         }
@@ -100,30 +177,32 @@ export class DualResponseClient {
     }
 
     /**
-     * Fetch a page of data from a resource endpoint
+     * Fetch a page of data from a resource endpoint using GET with query params
      *
      * @param {string} resourceUrl - The REST endpoint URL
      * @param {Object} options - Fetch options
-     * @param {number} options.offset - Starting row offset (default: 0)
-     * @param {number} options.limit - Max rows to fetch (default: 100)
-     * @param {Object} options.sort - Optional sort: { field, order: 'asc'|'desc' }
+     * @param {number} options.skip - Rows to skip (default: 0)
+     * @param {number} options.limit - Max rows to fetch (omit for all)
      * @returns {Promise<Object>} Fetch result with data and pagination info
      */
     async fetch(resourceUrl, options = {}) {
-        const { offset = 0, limit = 100, sort } = options;
+        const { skip = 0, limit } = options;
 
-        if (this.#debug) {
-            console.log('[DualResponse] Fetching:', resourceUrl);
-            console.log('[DualResponse] Options:', { offset, limit, sort });
+        // Build URL with query parameters
+        const url = new URL(resourceUrl);
+        if (skip > 0) {
+            url.searchParams.set('skip', skip.toString());
+        }
+        if (limit !== undefined && limit !== null) {
+            url.searchParams.set('limit', limit.toString());
         }
 
-        const response = await fetch(resourceUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ offset, limit, sort })
-        });
+        if (this.#debug) {
+            console.log('[DualResponse] Fetching:', url.toString());
+            console.log('[DualResponse] Options:', { skip, limit });
+        }
+
+        const response = await fetch(url.toString());
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: 'Unknown error' }));
@@ -134,7 +213,7 @@ export class DualResponseClient {
 
         if (this.#debug) {
             console.log('[DualResponse] Fetched:', result.returned_count, 'rows');
-            console.log('[DualResponse] Offset:', result.offset);
+            console.log('[DualResponse] Skip:', result.skip);
             console.log('[DualResponse] Has next:', result.has_next);
         }
 
@@ -153,7 +232,7 @@ export class DualResponseClient {
     async fetchAll(resourceUrl, options = {}) {
         const { batchSize = 500, onProgress } = options;
         const allRows = [];
-        let offset = 0;
+        let skip = 0;
         let hasNext = true;
         let totalCount = 0;
 
@@ -165,14 +244,14 @@ export class DualResponseClient {
 
         while (hasNext) {
             const result = await this.fetch(resourceUrl, {
-                offset,
+                skip,
                 limit: batchSize
             });
 
             allRows.push(...result.data);
             hasNext = result.has_next;
             totalCount = result.total_count;
-            offset = result.next_offset || (offset + result.data.length);
+            skip = skip + result.data.length;
 
             if (onProgress) {
                 onProgress(allRows.length, totalCount);

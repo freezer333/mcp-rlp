@@ -1,0 +1,16 @@
+{
+  "name": "mcp-client-example",
+  "version": "1.0.0",
+  "description": "MCP client demonstration with OpenAI",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env index.js",
+    "debug": "node --env-file=.env index.js --debug"
+  },
+  "dependencies": {
+    "@openai/agents": "^0.1.0",
+    "blessed": "^0.1.81",
+    "cli-table3": "^0.6.5"
+  }
+}

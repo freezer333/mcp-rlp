@@ -47,15 +47,24 @@ class MCPServer {
                     const validatedInput = inputSchema.parse(args);
                     const results = await tool.handler(validatedInput);
 
-                    return {
+                    // Build text content - stringify if object, otherwise use as-is
+                    const textContent = typeof results === 'string'
+                        ? results
+                        : JSON.stringify(results, null, 2);
+
+                    const response = {
                         content: [{
                             type: "text",
-                            text: JSON.stringify(results, null, 2),
-                        }],
-                        structuredContent: tool.outputSchema
-                            ? z.object(tool.outputSchema).parse(results)
-                            : results
+                            text: textContent,
+                        }]
                     };
+
+                    // Only include structuredContent if there's an outputSchema
+                    if (tool.outputSchema) {
+                        response.structuredContent = z.object(tool.outputSchema).parse(results);
+                    }
+
+                    return response;
                 }
             );
         }

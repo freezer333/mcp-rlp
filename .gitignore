@@ -1,2 +1,11 @@
 # macOS
 .DS_Store
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Office temp files
+~$*

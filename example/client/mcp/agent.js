@@ -6,6 +6,7 @@
  */
 
 import { Agent, run, MCPServerStreamableHttp } from '@openai/agents';
+import { DualResponseClient } from './dual-response.js';
 
 export class MCPAgent {
     #mcpServer;
@@ -13,11 +14,17 @@ export class MCPAgent {
     #serverUrl;
     #model;
     #history;
+    #dualResponseClient;
+    #pendingDualResponses;
+    #debug;
 
     constructor(serverUrl, options = {}) {
         this.#serverUrl = serverUrl;
         this.#model = options.model || process.env.OPENAI_MODEL || 'gpt-4o';
         this.#history = [];
+        this.#debug = options.debug || false;
+        this.#dualResponseClient = new DualResponseClient({ debug: this.#debug });
+        this.#pendingDualResponses = [];
     }
 
     /**
@@ -86,11 +93,16 @@ Start by calling the 'tips' tool to understand the database structure if this is
      * @param {string} prompt - User's input
      * @param {function} onToolCall - Callback when a tool is called: (toolName, args) => void
      * @param {function} onToolResult - Callback when tool returns: (toolName, result) => void
-     * @returns {Promise<{text: string, tables: Array<{title: string, columns: string[], rows: any[]}>}>}
+     * @returns {Promise<{text: string, tables: Array, dualResponses: Array}>}
      */
     async chat(prompt, onToolCall, onToolResult) {
-        console.log('[DEBUG] Starting chat with prompt:', prompt);
-        console.log('[DEBUG] History length:', this.#history.length);
+        if (this.#debug) {
+            console.log('[DEBUG] Starting chat with prompt:', prompt);
+            console.log('[DEBUG] History length:', this.#history.length);
+        }
+
+        // Clear pending dual-responses for this chat turn
+        this.#pendingDualResponses = [];
 
         // Build input: if we have history, append the new user message to it
         // Otherwise just use the prompt string
@@ -100,37 +112,93 @@ Start by calling the 'tips' tool to understand the database structure if this is
 
         const result = await run(this.#agent, input, {
             onToolCall: (toolCall) => {
-                console.log('[DEBUG] Tool call:', toolCall);
+                if (this.#debug) {
+                    console.log('[DEBUG] Tool call:', toolCall);
+                }
                 if (onToolCall) {
                     onToolCall(toolCall.name, toolCall.arguments || {});
                 }
             },
             onToolResult: (toolResult) => {
-                console.log('[DEBUG] Tool result:', toolResult);
+                if (this.#debug) {
+                    console.log('[DEBUG] Tool result:', toolResult);
+                }
+
+                // Check for dual-response pattern
+                if (this.#dualResponseClient.isDualResponse(toolResult.result)) {
+                    const parsed = this.#dualResponseClient.parse(toolResult.result);
+                    if (parsed) {
+                        if (this.#debug) {
+                            console.log('[DEBUG] Dual-response detected:', {
+                                totalCount: parsed.totalCount,
+                                sampleCount: parsed.sampleCount,
+                                resourceUrl: parsed.resourceUrl
+                            });
+                        }
+                        this.#pendingDualResponses.push({
+                            toolName: toolResult.name,
+                            ...parsed
+                        });
+                    }
+                }
+
                 if (onToolResult) {
                     onToolResult(toolResult.name, toolResult.result);
                 }
             }
         });
 
-        console.log('[DEBUG] Run result:', result);
+        if (this.#debug) {
+            console.log('[DEBUG] Run result:', result);
+            console.log('[DEBUG] Pending dual-responses:', this.#pendingDualResponses.length);
+        }
 
         // Save history for next turn
         this.#history = result.history || [];
 
         // Parse the JSON response
+        let text = '';
+        let tables = [];
         try {
             const parsed = JSON.parse(result.finalOutput);
-            return {
-                text: parsed.text || '',
-                tables: parsed.tables || []
-            };
+            text = parsed.text || '';
+            tables = parsed.tables || [];
         } catch {
             // If not valid JSON, return as plain text
-            return {
-                text: result.finalOutput,
-                tables: []
-            };
+            text = result.finalOutput;
         }
+
+        return {
+            text,
+            tables,
+            dualResponses: [...this.#pendingDualResponses]
+        };
+    }
+
+    /**
+     * Fetch full data for a dual-response
+     *
+     * @param {Object} dualResponse - Parsed dual-response from chat()
+     * @param {Object} options - Fetch options
+     * @param {number} options.batchSize - Rows per batch (default: 500)
+     * @param {Function} options.onProgress - Progress callback: (fetched, total) => void
+     * @returns {Promise<Array>} All rows from the resource
+     */
+    async fetchDualResponse(dualResponse, options = {}) {
+        return this.#dualResponseClient.fetchAll(dualResponse.resourceUrl, options);
+    }
+
+    /**
+     * Fetch a single page of data for a dual-response
+     *
+     * @param {Object} dualResponse - Parsed dual-response from chat()
+     * @param {Object} options - Fetch options
+     * @param {number} options.offset - Starting row offset
+     * @param {number} options.limit - Max rows to fetch
+     * @param {Object} options.sort - Sort options: { field, order }
+     * @returns {Promise<Object>} Page of data with pagination info
+     */
+    async fetchDualResponsePage(dualResponse, options = {}) {
+        return this.#dualResponseClient.fetch(dualResponse.resourceUrl, options);
     }
 }

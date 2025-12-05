@@ -8,7 +8,10 @@
   },
   "scripts": {
     "start": "node --experimental-sqlite index.js",
-    "dev": "nodemon --experimental-sqlite index.js",
+    "debug": "node --experimental-sqlite index.js --debug",
+    "mcp-only": "DUAL_RESPONSE=false node --experimental-sqlite index.js",
+    "dev": "nodemon --experimental-sqlite index.js --debug",
+    "dev:standard": "DUAL_RESPONSE=false nodemon --experimental-sqlite index.js --debug",
     "init": "node initialize-data.js"
   },
   "author": "",

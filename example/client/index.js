@@ -20,8 +20,8 @@ async function main() {
     ui.appendOutput('{bold}MCP Client Demo{/bold}');
     ui.appendOutput('Connecting to MCP server...\n');
 
-    // Initialize MCP agent
-    const agent = new MCPAgent(MCP_SERVER_URL);
+    // Initialize MCP agent with debug mode
+    const agent = new MCPAgent(MCP_SERVER_URL, { debug: DEBUG_MODE });
 
     try {
         const tools = await agent.connect();
@@ -75,9 +75,34 @@ async function main() {
                 ui.appendAssistantMessage(response.text);
             }
 
-            // Display any tables
+            // Display any tables from LLM response
             for (const table of response.tables) {
                 ui.appendTable(table.title, table.columns, table.rows);
+            }
+
+            // Handle dual-responses: auto-fetch full results
+            if (response.dualResponses && response.dualResponses.length > 0) {
+                for (const dr of response.dualResponses) {
+                    ui.appendOutput(`\n{yellow-fg}Fetching full results ({/yellow-fg}{bold}${dr.totalCount}{/bold}{yellow-fg} rows)...{/yellow-fg}`);
+                    ui.setStatus(`Fetching ${dr.totalCount} rows...`);
+
+                    try {
+                        const allRows = await agent.fetchDualResponse(dr, {
+                            batchSize: 500,
+                            onProgress: (fetched, total) => {
+                                ui.setStatus(`Fetching: ${fetched}/${total} rows`);
+                            }
+                        });
+
+                        // Display the full results as a table
+                        const columns = dr.columns.map(c => c.name);
+                        const rows = allRows.map(row => columns.map(col => row[col]));
+                        ui.appendTable(`Full Results (${allRows.length} rows)`, columns, rows);
+                        ui.appendOutput(`{green-fg}Fetched ${allRows.length} rows via REST endpoint{/green-fg}`);
+                    } catch (fetchError) {
+                        ui.appendError(`Failed to fetch full results: ${fetchError.message}`);
+                    }
+                }
             }
 
         } catch (error) {

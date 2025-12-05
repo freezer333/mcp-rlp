@@ -6,3 +6,4 @@
  */
 
 export { MCPAgent } from './agent.js';
+export { DualResponseClient } from './dual-response.js';

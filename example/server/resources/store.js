@@ -27,7 +27,6 @@ class ResourceStore {
      * @param {Object} queryDefinition - The query definition to store
      * @param {string} queryDefinition.sql - The SQL query (without LIMIT)
      * @param {number} queryDefinition.totalCount - Total row count
-     * @param {Array} queryDefinition.columns - Column metadata
      * @returns {string} The generated GUID
      */
     create(queryDefinition) {
@@ -37,7 +36,6 @@ class ResourceStore {
             id: guid,
             sql: queryDefinition.sql,
             totalCount: queryDefinition.totalCount,
-            columns: queryDefinition.columns || [],
             createdAt: new Date().toISOString(),
             accessCount: 0,
             lastAccessedAt: null,

@@ -15,22 +15,6 @@ function getDatabase() {
 }
 
 /**
- * Infer column types from a sample row
- * @param {Object} row - A sample row object
- * @returns {Array} Column metadata
- */
-function inferColumnTypes(row) {
-    if (!row) return [];
-
-    return Object.entries(row).map(([name, value]) => ({
-        name,
-        type: value === null ? 'string' :
-              typeof value === 'number' ? 'number' :
-              typeof value === 'boolean' ? 'boolean' : 'string'
-    }));
-}
-
-/**
  * Dual-Response Query Tool
  *
  * Implements the dual-response pattern for MCP:
@@ -76,12 +60,7 @@ IMPORTANT: Institution and program names are stored in UPPERCASE. When searching
             metadata: z.object({
                 total_count: z.number().describe('Total number of matching rows'),
                 sample_count: z.number().describe('Number of rows in sample'),
-                columns: z.array(z.object({
-                    name: z.string(),
-                    type: z.string()
-                })).describe('Column metadata'),
-                executed_at: z.string(),
-                expires_at: z.string().nullable()
+                executed_at: z.string()
             }).describe('Query execution metadata')
         },
 
@@ -126,20 +105,10 @@ IMPORTANT: Institution and program names are stored in UPPERCASE. When searching
                     console.log('[query-dual-response] Sample rows returned:', sampleRows.length);
                 }
 
-                // Step 3: Infer column types from sample
-                const columns = sampleRows.length > 0
-                    ? inferColumnTypes(sampleRows[0])
-                    : [];
-
-                if (debug) {
-                    console.log('[query-dual-response] Columns:', columns.map(c => c.name).join(', '));
-                }
-
-                // Step 4: Store resource for REST retrieval
+                // Step 3: Store resource for REST retrieval
                 const guid = resourceStore.create({
                     sql: sql,  // Store WITHOUT LIMIT for pagination
-                    totalCount,
-                    columns
+                    totalCount
                 });
 
                 const resourceUri = `resource://${guid}`;
@@ -151,7 +120,7 @@ IMPORTANT: Institution and program names are stored in UPPERCASE. When searching
                     console.log('[query-dual-response] ========================================');
                 }
 
-                // Step 5: Return dual-response structure
+                // Step 4: Return dual-response structure
                 return {
                     results: sampleRows,
                     resource: {
@@ -163,9 +132,7 @@ IMPORTANT: Institution and program names are stored in UPPERCASE. When searching
                     metadata: {
                         total_count: totalCount,
                         sample_count: sampleRows.length,
-                        columns,
-                        executed_at: new Date().toISOString(),
-                        expires_at: null  // NOTE: Implement expiration in production
+                        executed_at: new Date().toISOString()
                     }
                 };
 

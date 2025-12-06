@@ -8,6 +8,68 @@
 import { Agent, run, MCPServerStreamableHttp } from '@openai/agents';
 import { DualResponseClient } from './dual-response.js';
 
+/**
+ * Extract tool outputs from agent run result.
+ *
+ * Different LLM SDKs structure tool outputs differently. This function
+ * handles the OpenAI Agents SDK format, which nests outputs in
+ * result.state._generatedItems with potential JSON wrapping.
+ *
+ * For other SDKs (Anthropic, LangChain, etc.), you'll need to adapt
+ * this extraction logic to match their output structure.
+ *
+ * @param {Object} result - The agent run result
+ * @param {boolean} debug - Enable debug logging
+ * @returns {Array<{toolName: string, output: Object}>} Extracted tool outputs
+ */
+function extractToolOutputs(result, debug = false) {
+    const outputs = [];
+
+    if (!result.state?._generatedItems) {
+        return outputs;
+    }
+
+    for (const item of result.state._generatedItems) {
+        if (item.type !== 'tool_call_output_item') continue;
+
+        const rawOutput = item.rawItem?.output;
+        if (!rawOutput) continue;
+
+        // Unwrap nested JSON structure (SDK-specific)
+        // OpenAI Agents SDK wraps outputs as: { type: "text", text: "{...json...}" }
+        // Sometimes with multiple nesting levels
+        let data = null;
+        try {
+            if (rawOutput.type === 'text' && rawOutput.text) {
+                const level1 = JSON.parse(rawOutput.text);
+                if (level1.type === 'text' && level1.text) {
+                    data = JSON.parse(level1.text);
+                } else {
+                    data = level1;
+                }
+            } else if (typeof rawOutput === 'string') {
+                data = JSON.parse(rawOutput);
+            } else {
+                data = rawOutput;
+            }
+        } catch (e) {
+            if (debug) {
+                console.log('[DEBUG] Failed to parse tool output:', e.message);
+            }
+            continue;
+        }
+
+        if (data) {
+            outputs.push({
+                toolName: item.rawItem?.name || 'unknown',
+                output: data
+            });
+        }
+    }
+
+    return outputs;
+}
+
 export class MCPAgent {
     #mcpServer;
     #agent;
@@ -156,74 +218,27 @@ Start by calling the 'tips' tool to understand the database structure if this is
             console.log('[DEBUG] Pending dual-responses:', this.#pendingDualResponses.length);
         }
 
-        // Extract dual-responses from generated items since callbacks may not fire
-        // The SDK stores tool outputs in result.state._generatedItems
-        if (result.state?._generatedItems) {
-            for (const item of result.state._generatedItems) {
-                // Only process tool call output items
-                if (item.type !== 'tool_call_output_item') continue;
+        // Extract dual-responses from tool outputs
+        // Note: onToolResult callbacks may not fire reliably in all SDKs,
+        // so we also extract from the final result state
+        const toolOutputs = extractToolOutputs(result, this.#debug);
 
-                // The output is at rawItem.output and may be nested:
-                // { type: "text", text: "{\"type\":\"text\",\"text\":\"{...actual JSON...}\"}" }
-                const rawOutput = item.rawItem?.output;
-                if (!rawOutput) continue;
+        for (const { toolName, output } of toolOutputs) {
+            if (this.#debug) {
+                console.log('[DEBUG] Checking tool output:', toolName, Object.keys(output));
+            }
 
-                // Unwrap the nested structure to get to the actual JSON
-                let actualData = null;
-                try {
-                    // rawOutput is { type: "text", text: "..." }
-                    if (rawOutput.type === 'text' && rawOutput.text) {
-                        // Parse first level - might be another wrapper or actual data
-                        const level1 = JSON.parse(rawOutput.text);
-                        if (level1.type === 'text' && level1.text) {
-                            // Another level of wrapping
-                            actualData = JSON.parse(level1.text);
-                        } else {
-                            actualData = level1;
-                        }
-                    } else if (typeof rawOutput === 'string') {
-                        actualData = JSON.parse(rawOutput);
-                    } else {
-                        actualData = rawOutput;
-                    }
-                } catch (e) {
-                    if (this.#debug) {
-                        console.log('[DEBUG] Failed to parse tool output:', e.message);
-                    }
-                    continue;
-                }
-
-                if (this.#debug) {
-                    console.log('[DEBUG] Parsed tool output keys:', actualData ? Object.keys(actualData) : 'null');
-                }
-
-                // Check if this is a dual-response (has resource.url)
-                if (actualData?.resource?.url) {
+            // Check if this is a dual-response (has resource.url)
+            if (output?.resource?.url) {
+                const parsed = this.#dualResponseClient.parse(output);
+                if (parsed && !this.#pendingDualResponses.some(dr => dr.resourceUrl === parsed.resourceUrl)) {
                     if (this.#debug) {
                         console.log('[DEBUG] Dual-response found:', {
-                            totalCount: actualData.metadata?.total_count,
-                            resourceUrl: actualData.resource.url
+                            totalCount: parsed.totalCount,
+                            resourceUrl: parsed.resourceUrl
                         });
                     }
-
-                    const parsed = {
-                        sample: actualData.results || [],
-                        totalCount: actualData.metadata?.total_count || 0,
-                        sampleCount: actualData.metadata?.sample_count || actualData.results?.length || 0,
-                        resourceUri: actualData.resource.uri,
-                        resourceUrl: actualData.resource.url,
-                        columns: actualData.metadata?.columns || [],
-                        executedAt: actualData.metadata?.executed_at,
-                        expiresAt: actualData.metadata?.expires_at
-                    };
-
-                    // Avoid duplicates
-                    if (!this.#pendingDualResponses.some(dr => dr.resourceUrl === parsed.resourceUrl)) {
-                        this.#pendingDualResponses.push({
-                            toolName: item.rawItem?.name || 'query',
-                            ...parsed
-                        });
-                    }
+                    this.#pendingDualResponses.push({ toolName, ...parsed });
                 }
             }
         }

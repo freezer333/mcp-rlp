@@ -59,7 +59,8 @@ async function main() {
                 limit: PAGE_SIZE
             });
 
-            const columns = dr.columns.map(c => c.name);
+            // Get column names from the first row of data
+            const columns = result.data.length > 0 ? Object.keys(result.data[0]) : [];
             const rows = result.data.map(row => columns.map(col => row[col]));
 
             const startRow = skip + 1;
@@ -159,7 +160,8 @@ async function main() {
                     }
                 });
 
-                const columns = currentDualResponse.columns.map(c => c.name);
+                // Get column names from the first row of data
+                const columns = allRows.length > 0 ? Object.keys(allRows[0]) : [];
                 const rows = allRows.map(row => columns.map(col => row[col]));
                 ui.appendTable(`All Results (${allRows.length} rows)`, columns, rows);
                 ui.appendOutput(`{green-fg}Fetched ${allRows.length} rows via REST endpoint{/green-fg}`);

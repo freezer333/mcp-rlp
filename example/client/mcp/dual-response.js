@@ -155,12 +155,8 @@ export class DualResponseClient {
             resourceUri: structured.resource.uri,
             resourceUrl: structured.resource.url,
 
-            // Column information
-            columns: structured.metadata?.columns || [],
-
             // Timestamps
-            executedAt: structured.metadata?.executed_at,
-            expiresAt: structured.metadata?.expires_at
+            executedAt: structured.metadata?.executed_at
         };
 
         if (this.#debug) {
@@ -169,7 +165,6 @@ export class DualResponseClient {
             console.log('[DualResponse] Total count:', parsed.totalCount);
             console.log('[DualResponse] Sample count:', parsed.sampleCount);
             console.log('[DualResponse] Resource URL:', parsed.resourceUrl);
-            console.log('[DualResponse] Columns:', parsed.columns.map(c => c.name).join(', '));
             console.log('[DualResponse] ========================================');
         }
 

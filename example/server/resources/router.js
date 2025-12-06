@@ -89,10 +89,7 @@ function createResourceRouter(resourceStore, options = {}) {
                 skip,
                 limit,
                 has_next: hasNext,
-                has_prev: hasPrev,
-                columns: resource.columns,
-                created_at: resource.createdAt,
-                expires_at: resource.expiresAt
+                has_prev: hasPrev
             });
 
         } catch (error) {
